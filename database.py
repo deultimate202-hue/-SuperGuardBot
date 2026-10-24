@@ -13,20 +13,20 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             chat_id INTEGER PRIMARY KEY,
-            anti_spam INTEGER DEFAULT 1,
-            anti_flood INTEGER DEFAULT 1,
-            blocked_words TEXT DEFAULT '[]',
-            blocked_domains TEXT DEFAULT '[]',
-            warn_limit INTEGER DEFAULT 3,
-            mute_duration INTEGER DEFAULT 60
+            content_filter_enabled INTEGER DEFAULT 1,
+            rate_limit_enabled INTEGER DEFAULT 1,
+            filtered_terms TEXT DEFAULT '[]',
+            filtered_domains TEXT DEFAULT '[]',
+            notify_limit INTEGER DEFAULT 3,
+            restrict_duration INTEGER DEFAULT 60
         )
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_state (
             chat_id INTEGER,
             user_id INTEGER,
-            warnings INTEGER DEFAULT 0,
-            muted_until INTEGER DEFAULT 0,
+            notifications INTEGER DEFAULT 0,
+            restricted_until INTEGER DEFAULT 0,
             last_msg_time REAL DEFAULT 0,
             msg_count INTEGER DEFAULT 0,
             PRIMARY KEY (chat_id, user_id)
@@ -42,7 +42,6 @@ def get_settings(chat_id):
     row = cursor.fetchone()
     conn.close()
     if not row:
-        # Initialize default settings if not exists
         conn = get_db()
         conn.cursor().execute("INSERT INTO settings (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
@@ -51,17 +50,17 @@ def get_settings(chat_id):
     
     return {
         "chat_id": row["chat_id"],
-        "anti_spam": bool(row["anti_spam"]),
-        "anti_flood": bool(row["anti_flood"]),
-        "blocked_words": json.loads(row["blocked_words"]),
-        "blocked_domains": json.loads(row["blocked_domains"]),
-        "warn_limit": row["warn_limit"],
-        "mute_duration": row["mute_duration"]
+        "content_filter_enabled": bool(row["content_filter_enabled"]),
+        "rate_limit_enabled": bool(row["rate_limit_enabled"]),
+        "filtered_terms": json.loads(row["filtered_terms"]),
+        "filtered_domains": json.loads(row["filtered_domains"]),
+        "notify_limit": row["notify_limit"],
+        "restrict_duration": row["restrict_duration"]
     }
 
 def update_settings(chat_id, key, value):
     conn = get_db()
-    if key in ["blocked_words", "blocked_domains"]:
+    if key in ["filtered_terms", "filtered_domains"]:
         value = json.dumps(value)
     conn.cursor().execute(f"UPDATE settings SET {key} = ? WHERE chat_id = ?", (value, chat_id))
     conn.commit()
@@ -74,18 +73,18 @@ def get_user_state(chat_id, user_id):
     row = cursor.fetchone()
     conn.close()
     if not row:
-        return {"warnings": 0, "muted_until": 0, "last_msg_time": 0, "msg_count": 0}
+        return {"notifications": 0, "restricted_until": 0, "last_msg_time": 0, "msg_count": 0}
     return dict(row)
 
 def update_user_state(chat_id, user_id, state):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO user_state (chat_id, user_id, warnings, muted_until, last_msg_time, msg_count)
+        INSERT INTO user_state (chat_id, user_id, notifications, restricted_until, last_msg_time, msg_count)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(chat_id, user_id) 
-        DO UPDATE SET warnings=excluded.warnings, muted_until=excluded.muted_until, 
+        DO UPDATE SET notifications=excluded.notifications, restricted_until=excluded.restricted_until, 
                       last_msg_time=excluded.last_msg_time, msg_count=excluded.msg_count
-    ''', (chat_id, user_id, state["warnings"], state["muted_until"], state["last_msg_time"], state["msg_count"]))
+    ''', (chat_id, user_id, state["notifications"], state["restricted_until"], state["last_msg_time"], state["msg_count"]))
     conn.commit()
     conn.close()
