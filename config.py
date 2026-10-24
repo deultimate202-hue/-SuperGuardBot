@@ -10,4 +10,4 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is required to run the bot.")
 
 OWNER_ID = int(os.getenv("OWNER_ID", 0))
-DB_NAME = "superguard.db"
+DB_NAME = "assistant.db"
