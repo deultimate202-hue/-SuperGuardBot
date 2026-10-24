@@ -4,7 +4,7 @@ from telegram import Update, ChatPermissions
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError
 from database import get_settings, update_settings, get_user_state, update_user_state
-from moderation import check_flood, check_spam
+from moderation import check_message_rate, check_content_policy
 
 logger = logging.getLogger(__name__)
 
@@ -16,57 +16,57 @@ async def is_admin(bot, chat_id, user_id):
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("SuperGuard Bot is active. Use /help to see commands.")
+    await update.message.reply_text("Community Assistant Bot is active. Use /help to see commands.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "*SuperGuard Bot Commands:*\n"
+        "*Community Assistant Commands:*\n"
         "/settings - View current group settings\n"
-        "/addword `<word>` - Add a blocked word\n"
-        "/removeword `<word>` - Remove a blocked word\n"
-        "/adddomain `<domain>` - Add a blocked domain\n"
-        "/removedomain `<domain>` - Remove a blocked domain\n"
-        "/warn `<reply>` - Warn a user\n"
-        "/mute `<reply>` - Mute a user\n"
-        "/ban `<reply>` - Ban a user\n"
-        "Admins are automatically protected from moderation.",
+        "/addfilter `<term>` - Add a filtered term\n"
+        "/removefilter `<term>` - Remove a filtered term\n"
+        "/adddomainfilter `<domain>` - Add a filtered domain\n"
+        "/removedomainfilter `<domain>` - Remove a filtered domain\n"
+        "/notify `<reply>` - Issue a notification to a user\n"
+        "/restrict `<reply>` - Restrict a user temporarily\n"
+        "/limit `<reply>` - Apply a limit to a user\n"
+        "Administrators are automatically protected.",
         parse_mode="Markdown"
     )
     await update.message.reply_text(help_text)
 
 async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(context.bot, update.effective_chat.id, update.effective_user.id):
-        await update.message.reply_text("Only admins can view settings.")
+        await update.message.reply_text("Only administrators can view settings.")
         return
         
     settings = get_settings(update.effective_chat.id)
     msg = (
         f"*Group Settings:*\n"
-        f"Anti-Spam: {'Enabled' if settings['anti_spam'] else 'Disabled'}\n"
-        f"Anti-Flood: {'Enabled' if settings['anti_flood'] else 'Disabled'}\n"
-        f"Blocked Words: {', '.join(settings['blocked_words']) or 'None'}\n"
-        f"Blocked Domains: {', '.join(settings['blocked_domains']) or 'None'}\n"
-        f"Warn Limit: {settings['warn_limit']}\n"
-        f"Mute Duration: {settings['mute_duration']} mins"
+        f"Content Filter: {'Enabled' if settings['content_filter_enabled'] else 'Disabled'}\n"
+        f"Rate Limit: {'Enabled' if settings['rate_limit_enabled'] else 'Disabled'}\n"
+        f"Filtered Terms: {', '.join(settings['filtered_terms']) or 'None'}\n"
+        f"Filtered Domains: {', '.join(settings['filtered_domains']) or 'None'}\n"
+        f"Notification Limit: {settings['notify_limit']}\n"
+        f"Restrict Duration: {settings['restrict_duration']} mins"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(context.bot, update.effective_chat.id, update.effective_user.id):
-        return await update.message.reply_text("Admins only.")
+        return await update.message.reply_text("Administrators only.")
     if not context.args:
-        return await update.message.reply_text("Usage: /addword <word>")
+        return await update.message.reply_text("Usage: /addfilter <term>")
         
-    word = context.args[0].strip().lower()
+    term = context.args[0].strip().lower()
     settings = get_settings(update.effective_chat.id)
-    if word not in settings["blocked_words"]:
-        settings["blocked_words"].append(word)
-        update_settings(update.effective_chat.id, "blocked_words", settings["blocked_words"])
-        await update.message.reply_text(f"Added `{word}` to blocked words.", parse_mode="Markdown")
+    if term not in settings["filtered_terms"]:
+        settings["filtered_terms"].append(term)
+        update_settings(update.effective_chat.id, "filtered_terms", settings["filtered_terms"])
+        await update.message.reply_text(f"Added `{term}` to filtered terms.", parse_mode="Markdown")
     else:
-        await update.message.reply_text("Word already blocked.")
+        await update.message.reply_text("Term already filtered.")
 
-async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def process_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
         
@@ -74,64 +74,60 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.effective_message.text
     
-    # Protect admins
     if await is_admin(context.bot, chat_id, user_id):
         return
         
     settings = get_settings(chat_id)
     state = get_user_state(chat_id, user_id)
     
-    # Check if currently muted
-    if state["muted_until"] > time.time():
+    if state["restricted_until"] > time.time():
         try:
             await update.effective_message.delete()
         except TelegramError:
             pass
         return
 
-    # Check Spam
-    if check_spam(text, settings):
+    if check_content_policy(text, settings):
         try:
             await update.effective_message.delete()
-            await warn_user(context.bot, chat_id, user_id, settings, reason="Spam (Blocked word/domain)")
+            await notify_user(context.bot, chat_id, user_id, settings, reason="Content Policy Violation")
         except TelegramError as e:
-            logger.error(f"Failed to delete spam: {e}")
+            logger.error(f"Failed to handle content policy: {e}")
         return
 
-    # Check Flood
-    is_flooding, count = check_flood(chat_id, user_id, settings)
-    if is_flooding:
+    is_rate_limited, count = check_message_rate(chat_id, user_id, settings)
+    if is_rate_limited:
         try:
             await update.effective_message.delete()
-            await mute_user(context.bot, chat_id, user_id, settings, reason=f"Flooding ({count} messages)")
+            await restrict_user(context.bot, chat_id, user_id, settings, reason=f"Rapid Messaging ({count} messages)")
         except TelegramError as e:
-            logger.error(f"Failed to handle flood: {e}")
+            logger.error(f"Failed to handle rate limit: {e}")
 
-async def warn_user(bot, chat_id, user_id, settings, reason="Violation"):
+async def notify_user(bot, chat_id, user_id, settings, reason="Guideline Violation"):
     state = get_user_state(chat_id, user_id)
-    state["warnings"] += 1
+    state["notifications"] += 1
     
-    if state["warnings"] >= settings["warn_limit"]:
-        await mute_user(bot, chat_id, user_id, settings, reason=f"Reached {settings['warn_limit']} warnings")
-        state["warnings"] = 0
+    if state["notifications"] >= settings["notify_limit"]:
+        await restrict_user(bot, chat_id, user_id, settings, reason=f"Reached {settings['notify_limit']} notifications")
+        state["notifications"] = 0
     else:
         try:
-            await bot.send_message(chat_id, f"User {user_id} warned ({state['warnings']}/{settings['warn_limit']}). Reason: {reason}")
+            await bot.send_message(chat_id, f"User {user_id} notified ({state['notifications']}/{settings['notify_limit']}). Reason: {reason}")
         except TelegramError:
             pass
     update_user_state(chat_id, user_id, state)
 
-async def mute_user(bot, chat_id, user_id, settings, reason="Violation"):
+async def restrict_user(bot, chat_id, user_id, settings, reason="Guideline Violation"):
     state = get_user_state(chat_id, user_id)
-    state["muted_until"] = int(time.time()) + (settings["mute_duration"] * 60)
+    state["restricted_until"] = int(time.time()) + (settings["restrict_duration"] * 60)
     update_user_state(chat_id, user_id, state)
     
     try:
         await bot.restrict_chat_member(
             chat_id, user_id, 
             ChatPermissions(can_send_messages=False),
-            until_date=state["muted_until"]
+            until_date=state["restricted_until"]
         )
-        await bot.send_message(chat_id, f"User {user_id} muted for {settings['mute_duration']} mins. Reason: {reason}")
+        await bot.send_message(chat_id, f"User {user_id} restricted for {settings['restrict_duration']} mins. Reason: {reason}")
     except TelegramError as e:
-        logger.error(f"Failed to mute user: {e}")
+        logger.error(f"Failed to restrict user: {e}")
