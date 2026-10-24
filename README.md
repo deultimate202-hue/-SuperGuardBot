@@ -1,23 +1,22 @@
-# SuperGuard Bot
+# Community Assistant Bot
 
-A secure, multi-group Telegram anti-spam and moderation bot built with Python.
+A secure, multi-group Telegram community management and content filtering bot built with Python.
+
+## Overview
+This is a defensive, administrative moderation tool designed to protect Telegram groups from abuse and maintain community guidelines.
 
 ## Features
-- **Anti-Spam:** Detects and deletes messages containing blocked words or domains.
-- **Anti-Flood:** Restricts users sending too many messages in a short timeframe.
-- **Automated Moderation:** Warns, mutes, or bans users based on configurable thresholds.
-- **Admin Protection:** Automatically ignores administrators to prevent accidental moderation.
+- **Content Filtering:** Detects and removes messages containing filtered terms or domains.
+- **Rate Limiting:** Restricts users sending too many messages in a short timeframe.
+- **Automated Notifications:** Notifies, restricts, or limits users based on configurable thresholds.
+- **Admin Protection:** Automatically ignores administrators to prevent accidental restrictions.
 - **Multi-Group Support:** Independent settings for every group the bot is added to.
 - **Secure:** Uses SQLite for local storage, environment variables for secrets, and parameterized queries.
 
 ## Setup & Deployment
 
-1. **Clone and Install:**
+1. **Install Dependencies:**
 ```bash
-   git clone <your-repo-url>
-   cd superguard-bot
-   python3 -m venv venv
-   source venv/bin/activate
    pip install -r requirements.txt
 ```
 
@@ -25,7 +24,6 @@ A secure, multi-group Telegram anti-spam and moderation bot built with Python.
    Copy `.env.example` to `.env` and add your bot token from [@BotFather](https://t.me/BotFather).
 ```bash
    cp .env.example .env
-   nano .env
 ```
 
 3. **Telegram Bot Settings:**
